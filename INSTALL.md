@@ -1,7 +1,7 @@
 1. First clone the project and install requirments
     ```
-    git clone https://github.com/cfzd/FcaNet.git
-    cd FcaNet
+    git clone https://github.com/hady1011/WaveNet-C.git
+    cd WaveNet-C
     pip install -r requirements.txt
     ```
     
