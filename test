@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Jun  1 16:40:42 2022
+
+@author: hadi
+"""
+
+import pywt
+from matplotlib import pyplot
+
+import numpy
+from PIL import Image
+import urllib.request
+import io
+import torch
+import torch.nn as nn
+
+URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/bc/Zuse-Z4-Totale_deutsches-museum.jpg/315px-Zuse-Z4-Totale_deutsches-museum.jpg'
+
+print(pywt.families())
+
+w=pywt.Wavelet('Haar')
+pyplot.plot(w.dec_hi[::-1], label="dec hi")
+pyplot.plot(w.dec_lo[::-1], label="dec lo")
+pyplot.plot(w.rec_hi, label="rec hi")
+pyplot.plot(w.rec_lo, label="rec lo")
+pyplot.title("Bior 2.2 Wavelets")
+pyplot.legend()
+
+dec_hi = torch.tensor(w.dec_hi[::-1]) 
+print('dec_hi',dec_hi)
+dec_param_hi = nn.Parameter(torch.ones(2,dtype = torch.float)*0.5,requires_grad=True)
+print('dec_param_hi',dec_param_hi)
+
+dec_lo = torch.tensor(w.dec_lo[::-1])
+print('dec_lo',dec_lo)
+dec_param_lo = nn.Parameter(torch.ones(2,dtype = torch.float)*0.5,requires_grad=True)
+
+rec_hi = torch.tensor(w.rec_hi)
+print('rec_hi',rec_hi)
+
+rec_lo = torch.tensor(w.rec_lo)
+print('rec_lo',rec_lo)
+
+imgraw = Image.open(io.BytesIO(urllib.request.urlopen(URL).read())).resize((224,224))
+img = numpy.array(imgraw).mean(2)/255
+img = torch.from_numpy(img).float()
+pyplot.figure()
+pyplot.imshow(img, cmap=pyplot.cm.gray)
+
+filers = torch.stack([dec_param_lo.unsqueeze(0)*dec_param_lo.unsqueeze(1),
+                       dec_param_lo.unsqueeze(0)*dec_param_hi.unsqueeze(1),
+                       dec_param_hi.unsqueeze(0)*dec_param_lo.unsqueeze(1),
+                       dec_param_hi.unsqueeze(0)*dec_param_hi.unsqueeze(1)], dim=0)
+print('filers',filers)
+
+filters = torch.stack([dec_lo.unsqueeze(0)*dec_lo.unsqueeze(1),
+                       dec_lo.unsqueeze(0)*dec_hi.unsqueeze(1),
+                       dec_hi.unsqueeze(0)*dec_lo.unsqueeze(1),
+                       dec_hi.unsqueeze(0)*dec_hi.unsqueeze(1)], dim=0)
+print('filers',filters)
+
+inv_filters = torch.stack([rec_lo.unsqueeze(0)*rec_lo.unsqueeze(1),
+                           rec_lo.unsqueeze(0)*rec_hi.unsqueeze(1),
+                           rec_hi.unsqueeze(0)*rec_lo.unsqueeze(1),
+                           rec_hi.unsqueeze(0)*rec_hi.unsqueeze(1)], dim=0)
+
+
+
+def wt(vimg, levels=1):
+    filters = torch.stack([dec_lo.unsqueeze(0)*dec_lo.unsqueeze(1),
+                           dec_lo.unsqueeze(0)*dec_hi.unsqueeze(1),
+                           dec_hi.unsqueeze(0)*dec_lo.unsqueeze(1),
+                           dec_hi.unsqueeze(0)*dec_hi.unsqueeze(1)], dim=0)
+    h = vimg.size(2)
+    w = vimg.size(3)
+    padded = torch.nn.functional.pad(vimg,(0,0,0,0))
+    
+    #work to be done here for filters
+    #filters = filters.unsqueeze(-1)
+    #filters = torch.transpose(filters,2,3)
+    #filters = torch.transpose(filters, 1, 2)
+    #filters = filters.repeat(3,padded.shape[1],1,1)
+    
+    print('padded',padded.shape)
+    
+    print('filters',filters.shape)
+    res_channels = []
+    for i in range(padded.size(1)):
+        print('i',i)
+        x = padded[:,i,:,:].unsqueeze(-1).transpose(2,3).transpose(1,2)
+        res = torch.nn.functional.conv2d(x, filters[:,None],stride=2)
+        
+        print('conv_out',res.shape)
+        
+        if levels>1:
+            res[:,:1] = wt(res[:,:1],levels-1)
+        #res = res.view(-1,2,h//2,w//2).transpose(1,2).contiguous().view(-1,1,h,w)
+        
+        #kernel_size, stride = h//2,w//2
+        
+        
+        #patches = res.unfold(2, kernel_size, stride)
+        #patches = patches.unfold(3, kernel_size, stride)
+        
+        #print(patches.shape)
+        
+        #patches = patches.contiguous()
+        
+        patches = res.unsqueeze(-1).transpose(3,4).transpose(2,3).transpose(1,2)
+        print('patches_unsq',patches.shape)
+        #print(patches.shape)
+        #patches = res.view([res.size(0),-1,res.size(1),res.size(2),res.size(3)])
+        #patches = patches.view(patches.size(0),patches.size(1),-1,kernel_size,kernel_size)
+        #patches = patches.contiguous().view(patches.size(0), -1, kernel_size, kernel_size)
+        
+        print(patches.shape)
+        
+        #need to fix this
+        patches = torch.transpose(patches,2,3)
+        patches = torch.transpose(patches, 3,4)
+        
+        if(i == 0):
+            res_channels = patches
+        else:
+            res_channels = torch.cat([res_channels,patches],dim = 1)
+        print('res_channels',res_channels.shape)
+    #A = patches[:,:,0,:,:]
+    #V = patches[:,:,1,:,:]
+    #H = patches[:,:,2,:,:]
+    #D = patches[:,:,3,:,:]
+    
+    return res_channels
+
+#vimg = img[None,None]
+vimg = torch.rand([64,3,224,224])
+print(vimg.shape)
+res = wt(vimg,1)
+print(res.shape)
